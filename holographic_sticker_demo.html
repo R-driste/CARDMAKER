@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Holographic Sticker Demo — Carta</title>
+  <style>
+    html,body{height:100%;margin:0;background:#0e0d0b;color:#fff;font-family:system-ui,Segoe UI,Roboto}
+    #ui{position:fixed;left:12px;top:12px;display:flex;gap:8px;z-index:10}
+    button,input[type=range]{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);color:#fff;padding:8px;border-radius:8px}
+    label{display:flex;align-items:center;gap:8px}
+    canvas{display:block}
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <button id="toggle-holo">Toggle Holographic</button>
+    <label>Intensity <input id="holo-int" type="range" min="0" max="2" step="0.01" value="1"></label>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.154.0/build/three.module.js';
+    import { OrbitControls } from 'https://unpkg.com/three@0.154.0/examples/jsm/controls/OrbitControls.js';
+
+    const renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    document.body.appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0e0d0b);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.01, 100);
+    camera.position.set(0,1.4,5);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    // lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+    const dir = new THREE.DirectionalLight(0xfff5e0, 1.4);
+    dir.position.set(3,5,4); dir.castShadow = true; scene.add(dir);
+
+    // simple card (two-panel box) — front where sticker sits
+    const CARD_W = 2.2, CARD_H = 3.0, CARD_D = 0.05;
+    const cardMat = new THREE.MeshStandardMaterial({ color:0xf3efe7 });
+    const cardGeo = new THREE.BoxGeometry(CARD_W, CARD_H, CARD_D);
+    const card = new THREE.Mesh(cardGeo, cardMat);
+    card.castShadow = true; card.receiveShadow = true;
+    scene.add(card);
+
+    // create a sticker texture using canvas
+    function makeStickerTexture() {
+      const c = document.createElement('canvas');
+      c.width = 512; c.height = 512;
+      const ctx = c.getContext('2d');
+      // base circle sticker
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,c.width,c.height);
+      ctx.beginPath(); ctx.fillStyle = '#222233'; ctx.arc(256,256,170,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 56px Georgia'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('STICKER',256,256);
+      const tex = new THREE.CanvasTexture(c); tex.encoding = THREE.sRGBEncoding; tex.needsUpdate = true;
+      return tex;
+    }
+
+    const stickerBase = makeStickerTexture();
+
+    // holographic shader material
+    const holoUniforms = {
+      baseTex: { value: stickerBase },
+      time: { value: 0 },
+      holoIntensity: { value: 1.0 },
+      opacity: { value: 1.0 }
+    };
+
+    const holoVertex = `
+      varying vec2 vUv;
+      varying vec3 vNormal;
+      varying vec3 vWorldPos;
+      void main(){
+        vUv = uv;
+        vNormal = normalize(normalMatrix * normal);
+        vec4 worldPos = modelMatrix * vec4(position,1.0);
+        vWorldPos = worldPos.xyz;
+        gl_Position = projectionMatrix * viewMatrix * worldPos;
+      }
+    `;
+
+    const holoFragment = `
+      precision highp float;
+      varying vec2 vUv;
+      varying vec3 vNormal;
+      varying vec3 vWorldPos;
+      uniform sampler2D baseTex;
+      uniform float time;
+      uniform float holoIntensity;
+      uniform float opacity;
+
+      // simple HSV->RGB
+      vec3 hsv2rgb(vec3 c){
+        vec3 rgb = clamp( abs(mod(c.x*6.0 + vec3(0.0,4.0,2.0),6.0)-3.0)-1.0, 0.0, 1.0 );
+        rgb = rgb*rgb*(3.0-2.0*rgb);
+        return c.z * mix(vec3(1.0), rgb, c.y);
+      }
+
+      // a cheap pseudo-noise
+      float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123);} 
+      float noise(vec2 p){
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        float a = hash(i);
+        float b = hash(i + vec2(1.0,0.0));
+        float c = hash(i + vec2(0.0,1.0));
+        float d = hash(i + vec2(1.0,1.0));
+        vec2 u = f*f*(3.0-2.0*f);
+        return mix(a,b,u.x) + (c-a)*u.y*(1.0-u.x) + (d-b)*u.x*u.y;
+      }
+
+      void main(){
+        vec4 base = texture2D(baseTex, vUv);
+        // view direction
+        vec3 viewDir = normalize(cameraPosition - vWorldPos);
+        float fresnel = pow(1.0 - max(dot(normalize(vNormal), viewDir), 0.0), 2.5);
+
+        float w = noise(vUv * 30.0 + time * 0.6);
+        float wave = 0.5 + 0.5 * sin((vUv.x*30.0 + time*3.0) + vUv.y*12.0 + w*6.0);
+
+        float hue = fract(wave*1.3 + time*0.02 + vUv.y*0.2);
+        vec3 holo = hsv2rgb(vec3(hue, 0.85, 0.95));
+
+        vec3 mixed = mix(base.rgb, holo, fresnel * holoIntensity * (0.35 + 0.65*wave));
+        // subtle iridescent rim
+        mixed += holo * fresnel * 0.08;
+
+        gl_FragColor = vec4(mixed, base.a * opacity);
+      }
+    `;
+
+    const holoMat = new THREE.ShaderMaterial({
+      uniforms: holoUniforms,
+      vertexShader: holoVertex,
+      fragmentShader: holoFragment,
+      transparent: true
+    });
+
+    // place a plane slightly above the front face of the card
+    const stickerGeo = new THREE.PlaneGeometry(1.0,1.0);
+    const sticker = new THREE.Mesh(stickerGeo, holoMat);
+    // position on front face (front +Z direction)
+    sticker.position.set(0.3, 0.3, CARD_D/2 + 0.001);
+    sticker.rotation.y = 0;
+    scene.add(sticker);
+
+    // UI handling
+    const toggle = document.getElementById('toggle-holo');
+    const slider = document.getElementById('holo-int');
+    let enabled = true;
+    toggle.addEventListener('click',()=>{ enabled = !enabled; holoMat.uniforms.holoIntensity.value = enabled ? parseFloat(slider.value) : 0; toggle.classList.toggle('active', enabled); });
+    slider.addEventListener('input',(e)=>{ holoMat.uniforms.holoIntensity.value = enabled ? parseFloat(e.target.value) : 0; });
+
+    // animate
+    const clock = new THREE.Clock();
+    function animate(){
+      requestAnimationFrame(animate);
+      holoMat.uniforms.time.value = clock.getElapsedTime();
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', ()=>{
+      camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+  </script>
+</body>
+</html>

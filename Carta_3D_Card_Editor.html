@@ -1,0 +1,1719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Carta — 3D Card Engine</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0e0d0b; overflow: hidden; font-family: system-ui, sans-serif; }
+canvas { display: block; }
+
+#ui {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 0.75rem;
+  z-index: 10;
+}
+button {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.75);
+  padding: 0.55rem 1.2rem;
+  border-radius: 100px;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: all 0.2s;
+  backdrop-filter: blur(8px);
+}
+button:hover {
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+  border-color: rgba(255,255,255,0.22);
+}
+button.active {
+  background: rgba(201,168,76,0.18);
+  border-color: rgba(201,168,76,0.45);
+  color: #c9a84c;
+}
+
+#hint {
+  position: fixed;
+  top: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.25);
+  pointer-events: none;
+}
+
+/* ── EDITOR ── */
+#editor-panel {
+  position: fixed;
+  z-index: 30;
+  top: 0;
+  right: 0;
+  width: min(430px, 42vw);
+  min-width: 350px;
+  height: 100vh;
+  padding: 1.35rem;
+  background: rgba(18, 17, 15, 0.97);
+  border-left: 1px solid rgba(255,255,255,0.10);
+  box-shadow: -18px 0 50px rgba(0,0,0,0.35);
+  backdrop-filter: blur(20px);
+  color: rgba(255,255,255,0.85);
+  transform: translateX(102%);
+  transition: transform .35s cubic-bezier(.2,.8,.2,1);
+  display: flex;
+  flex-direction: column;
+  gap: .85rem;
+}
+#editor-panel.open { transform: translateX(0); }
+
+.editor-header { display:flex; justify-content:space-between; align-items:flex-start; }
+.editor-kicker { font-size:.62rem; letter-spacing:.18em; color:rgba(255,255,255,.32); }
+.editor-header h2 { margin-top:.18rem; font: 400 1.25rem Georgia,serif; color:#fff; }
+.editor-done {
+  min-width:70px; height:34px; border-radius:8px; padding:.25rem .7rem;
+  font-size:.72rem; line-height:1; border:1px solid rgba(201,168,76,.38);
+  color:#c9a84c; background:rgba(201,168,76,.08);
+}
+
+.surface-switcher { display:flex; gap:.35rem; }
+.surface-switcher select {
+  flex:1; min-width:0; padding:.62rem .8rem; border-radius:9px;
+  background:#26231e; color:#eee; border:1px solid rgba(255,255,255,.12);
+}
+.surface-arrow { width:38px; padding:0; }
+
+#editor-toolbar { display:grid; grid-template-columns:repeat(4,1fr); gap:.4rem; }
+.tool-btn { padding:.65rem .35rem; }
+.tool-btn.active { background:rgba(201,168,76,.18); border-color:rgba(201,168,76,.45); color:#c9a84c; }
+.tool-btn span { font-size:.7rem; margin-left:.2rem; }
+
+.tool-controls {
+  display:grid; grid-template-columns:1fr 1fr; gap:.55rem;
+  padding:.7rem; background:rgba(255,255,255,.035); border-radius:10px;
+}
+.tool-controls label { display:flex; align-items:center; justify-content:space-between; gap:.5rem; font-size:.7rem; color:rgba(255,255,255,.55); }
+.tool-controls input[type="range"] { width:90px; }
+.tool-controls input[type="number"], .tool-controls select { width:125px; }
+.tool-controls input, .tool-controls select {
+  background:#26231e; color:#eee; border:1px solid rgba(255,255,255,.12);
+  border-radius:6px; padding:.28rem .4rem;
+}
+.hidden { display:none !important; }
+
+.editor-canvas-wrap {
+  flex:1; min-height:200px; display:flex; align-items:center; justify-content:center;
+  overflow:hidden; background:#0a0908; border:1px solid rgba(255,255,255,.09); border-radius:12px;
+  padding:.8rem;
+}
+#editor-stage {
+  position:relative; flex:none; width:300px; height:400px;
+  max-width:100%; max-height:100%;
+}
+#editor-canvas, #interaction-canvas {
+  position:absolute; inset:0; width:100%; height:100%; border-radius:2px;
+}
+#editor-canvas {
+  display:block; background:#f3efe7; user-select:none;
+}
+#interaction-canvas {
+  display:block; cursor:default; touch-action:none; user-select:none;
+}
+#brush-cursor {
+  position:fixed; z-index:100; pointer-events:none; transform:translate(-50%,-50%);
+  border:2px solid #c9a84c; border-radius:50%;
+  background:rgba(201,168,76,.10); box-shadow:0 0 0 1px rgba(0,0,0,.25);
+}
+
+
+#text-input-overlay {
+  position:absolute; z-index:5; inset:20% 8%;
+  display:flex; flex-direction:column; gap:.5rem;
+}
+#text-input {
+  flex:1; resize:none; padding:.8rem; border-radius:8px;
+  background:rgba(20,20,18,.94); color:white; border:1px solid rgba(255,255,255,.2);
+  font: 1rem Georgia,serif;
+}
+.text-input-actions { display:flex; justify-content:flex-end; gap:.4rem; }
+.editor-actions { display:grid; grid-template-columns:repeat(4,1fr); gap:.4rem; }
+.editor-actions button { padding:.55rem .3rem; font-size:.68rem; }
+
+.editor-hint { font-size:.63rem; line-height:1.4; color:rgba(255,255,255,.28); text-align:center; }
+
+#btn-edit.active { background:rgba(201,168,76,.18); border-color:rgba(201,168,76,.45); color:#c9a84c; }
+
+@media (max-width: 700px) {
+  #editor-panel { width:100vw; min-width:0; }
+}
+
+</style>
+</head>
+<body>
+
+<div id="hint">Drag to spin &nbsp;·&nbsp; Click card to open</div>
+
+
+<!-- CARD EDITOR -->
+<aside id="editor-panel">
+  <div class="editor-header">
+    <div>
+      <div class="editor-kicker">CARD DESIGNER</div>
+      <h2>Edit Surface</h2>
+    </div>
+    <button id="btn-close-editor" class="editor-done" title="Finish editing">Done</button>
+  </div>
+
+  <div class="surface-switcher">
+    <button id="surface-prev" class="surface-arrow">‹</button>
+    <select id="surface-select" aria-label="Card surface">
+      <option value="front">Front Cover</option>
+      <option value="insideLeft">Inside Left</option>
+      <option value="insideRight">Inside Right</option>
+      <option value="back">Back Cover</option>
+    </select>
+    <button id="surface-next" class="surface-arrow">›</button>
+  </div>
+
+  <div id="editor-toolbar">
+    <button class="tool-btn active" data-tool="select">↖ <span>Select</span></button>
+    <button class="tool-btn" data-tool="draw">✎ <span>Draw</span></button>
+    <button class="tool-btn" data-tool="image">▧ <span>Image</span></button>
+    <button class="tool-btn" data-tool="text">T <span>Text</span></button>
+  </div>
+
+  <div id="draw-controls" class="tool-controls hidden">
+    <label>Color <input id="draw-color" type="color" value="#1a2e1f"></label>
+    <label>Size <input id="draw-size" type="range" min="1" max="40" value="6"><output id="draw-size-value">6</output></label>
+    <label>Opacity <input id="draw-opacity" type="range" min="0.1" max="1" step="0.05" value="1"></label>
+  </div>
+
+  <div id="text-controls" class="tool-controls hidden">
+    <label>Font
+      <select id="text-font">
+        <option>Georgia</option>
+        <option>Times New Roman</option>
+        <option>Arial</option>
+        <option>Helvetica</option>
+        <option>Courier New</option>
+      </select>
+    </label>
+    <label>Size <input id="text-size" type="number" min="8" max="240" value="56"></label>
+    <label>Color <input id="text-color" type="color" value="#1a2e1f"></label>
+    <label>Weight
+      <select id="text-weight">
+        <option value="400">Regular</option>
+        <option value="600">Semibold</option>
+        <option value="700">Bold</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="editor-canvas-wrap">
+    <div id="editor-stage">
+      <canvas id="editor-canvas"></canvas>
+      <canvas id="interaction-canvas"></canvas>
+      <div id="text-input-overlay" class="hidden">
+        <textarea id="text-input" placeholder="Type your message…"></textarea>
+        <div class="text-input-actions">
+          <button id="text-cancel">Cancel</button>
+          <button id="text-add">Add Text</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="editor-actions">
+    <button id="undo-btn">↶ Undo</button>
+    <button id="redo-btn">↷ Redo</button>
+    <button id="delete-btn">Delete</button>
+    <button id="toggle-holo-obj">Holographic</button>
+    <button id="clear-btn">Clear Surface</button>
+  </div>
+
+  <div class="editor-hint">Drag objects to move them. Drag corners to resize images. Double-click text to edit.</div>
+</aside>
+
+<input id="image-input" type="file" accept="image/*" hidden>
+
+<div id="ui">
+  <button id="btn-open">Open Card</button>
+  <button id="btn-edit">Edit Card</button>
+  <button id="btn-reset">Reset View</button>
+  <button id="btn-theme" class="active">Botanical</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ─────────────────────────────────────────
+// SCENE SETUP
+// ─────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0e0d0b);
+scene.fog = new THREE.Fog(0x0e0d0b, 12, 22);
+
+const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.01, 100);
+camera.position.set(0, 1.2, 5.5);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.055;
+controls.rotateSpeed = 0.65;
+controls.enablePan = false;
+controls.minDistance = 3;
+controls.maxDistance = 9;
+controls.minPolarAngle = 0.3;
+controls.maxPolarAngle = Math.PI * 0.7;
+controls.target.set(0, 0, 0);
+
+// ─────────────────────────────────────────
+// LIGHTING
+// ─────────────────────────────────────────
+
+// Ambient — warm fill
+const ambient = new THREE.AmbientLight(0xffe8c8, 0.35);
+scene.add(ambient);
+
+// Key light — warm from top-right
+const keyLight = new THREE.DirectionalLight(0xfff5e0, 2.2);
+keyLight.position.set(3, 5, 4);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(2048, 2048);
+keyLight.shadow.camera.near = 0.1;
+keyLight.shadow.camera.far = 20;
+keyLight.shadow.camera.left = -5;
+keyLight.shadow.camera.right = 5;
+keyLight.shadow.camera.top = 5;
+keyLight.shadow.camera.bottom = -5;
+keyLight.shadow.bias = -0.0003;
+keyLight.shadow.normalBias = 0.02;
+scene.add(keyLight);
+
+// Fill light — cool from left
+const fillLight = new THREE.DirectionalLight(0xc8d8f0, 0.5);
+fillLight.position.set(-4, 2, 2);
+scene.add(fillLight);
+
+// Rim light — from behind, for edge glow
+const rimLight = new THREE.DirectionalLight(0xffeedd, 0.4);
+rimLight.position.set(0, -1, -4);
+scene.add(rimLight);
+
+// Point light — warm glow near card interior (activates on open)
+const interiorLight = new THREE.PointLight(0xffe0b0, 0, 3, 2);
+interiorLight.position.set(0, 0.2, 0.5);
+scene.add(interiorLight);
+
+// ─────────────────────────────────────────
+// GROUND PLANE + SHADOW RECEIVER
+// ─────────────────────────────────────────
+const groundGeo = new THREE.PlaneGeometry(20, 20);
+const groundMat = new THREE.ShadowMaterial({ opacity: 0.55, color: 0x000000 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -1.15;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Subtle ground gradient disc
+const discGeo = new THREE.CircleGeometry(2.5, 64);
+const discMat = new THREE.MeshBasicMaterial({
+  color: 0x1a1710,
+  transparent: true,
+  opacity: 0.7,
+  depthWrite: false,
+});
+const disc = new THREE.Mesh(discGeo, discMat);
+disc.rotation.x = -Math.PI / 2;
+disc.position.y = -1.14;
+scene.add(disc);
+
+// ─────────────────────────────────────────
+// THEMES
+// ─────────────────────────────────────────
+const THEMES = {
+  Botanical: {
+    cover: 0x1a3d2b,
+    coverDark: 0x152e20,
+    interior: 0xf3efe7,
+    interiorText: 0x1a2e1f,
+    accent: 0xc9a84c,
+    spine: 0x0f2016,
+  },
+  Celestial: {
+    cover: 0x0c1a38,
+    coverDark: 0x080f22,
+    interior: 0xf0eee8,
+    interiorText: 0x161628,
+    accent: 0xe8c840,
+    spine: 0x050a18,
+  },
+  Warmth: {
+    cover: 0xa84e20,
+    coverDark: 0x8a3e18,
+    interior: 0xfdf3e8,
+    interiorText: 0x3a1808,
+    accent: 0xf0dcc0,
+    spine: 0x5a2010,
+  },
+};
+let currentTheme = 'Botanical';
+const themeKeys = Object.keys(THEMES);
+
+// ─────────────────────────────────────────
+// CARD DIMENSIONS
+// ─────────────────────────────────────────
+const W = 1.5;   // half-width (one side of the card)
+const H = 2.0;   // full height
+const D = 0.018; // thickness of each panel
+const SPINE_W = 0.04;
+
+// ─────────────────────────────────────────
+// TEXTURE HELPERS
+// ─────────────────────────────────────────
+function makeCanvas(w, h, fn) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  fn(c.getContext('2d'), w, h);
+  return new THREE.CanvasTexture(c);
+}
+
+function hexToCSS(hex) {
+  return '#' + hex.toString(16).padStart(6, '0');
+}
+
+function makeCoverTexture(theme) {
+  return makeCanvas(512, 682, (ctx, w, h) => {
+    const t = THEMES[theme];
+    // background
+    ctx.fillStyle = hexToCSS(t.cover);
+    ctx.fillRect(0, 0, w, h);
+
+    // subtle vignette
+    const vg = ctx.createRadialGradient(w/2, h/2, h*0.2, w/2, h/2, h*0.75);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.35)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, w, h);
+
+    // decorative corner lines
+    ctx.strokeStyle = hexToCSS(t.accent);
+    ctx.globalAlpha = 0.18;
+    ctx.lineWidth = 1;
+    const m = 28;
+    const l = 55;
+    [[m, m],[w-m, m],[m, h-m],[w-m, h-m]].forEach(([cx, cy]) => {
+      const sx = cx < w/2 ? 1 : -1;
+      const sy = cy < h/2 ? 1 : -1;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + sy * l);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(cx + sx * l, cy);
+      ctx.stroke();
+    });
+
+    // center botanical motif (simple SVG-style paths drawn on canvas)
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = hexToCSS(t.accent);
+    ctx.lineWidth = 1.5;
+    // stem
+    ctx.beginPath();
+    ctx.moveTo(w/2, h/2 + 80);
+    ctx.quadraticCurveTo(w/2, h/2, w/2, h/2 - 80);
+    ctx.stroke();
+    // leaves
+    for (let i = -1; i <= 1; i += 2) {
+      for (let j = -40; j <= 40; j += 40) {
+        ctx.beginPath();
+        ctx.ellipse(w/2 + i*40, h/2 + j, 35, 14, Math.PI * 0.22 * i, 0, Math.PI*2);
+        ctx.stroke();
+      }
+    }
+
+    ctx.globalAlpha = 1;
+
+    // title text
+    ctx.fillStyle = hexToCSS(t.accent);
+    ctx.font = '500 22px Georgia, serif';
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = 0.85;
+    ctx.fillText('Sarah', w/2, h/2 + 140);
+
+    ctx.font = '300 12px system-ui';
+    ctx.letterSpacing = '3px';
+    ctx.globalAlpha = 0.45;
+    ctx.fillText('BIRTHDAY', w/2, h/2 + 165);
+    ctx.globalAlpha = 1;
+  });
+}
+
+function makeInteriorTexture(theme) {
+  return makeCanvas(512, 682, (ctx, w, h) => {
+    const t = THEMES[theme];
+    ctx.fillStyle = hexToCSS(t.interior);
+    ctx.fillRect(0, 0, w, h);
+
+    // subtle warm gradient
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, 'rgba(255,255,255,0.18)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.04)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    // message text
+    ctx.fillStyle = hexToCSS(t.interiorText);
+    ctx.textAlign = 'center';
+
+    ctx.font = 'italic 18px Georgia, serif';
+    ctx.globalAlpha = 0.8;
+    const lines = [
+      'Wishing you a day as bright',
+      'and beautiful as you are.',
+      '',
+      'May this year bring you',
+      'everything your heart desires.',
+    ];
+    lines.forEach((line, i) => {
+      ctx.fillText(line, w/2, h/2 - 40 + i * 30);
+    });
+
+    ctx.font = '300 12px system-ui';
+    ctx.globalAlpha = 0.45;
+    ctx.fillText('— With love, Alex', w/2, h/2 + 120);
+    ctx.globalAlpha = 1;
+  });
+}
+
+function makeSpineTexture(theme) {
+  return makeCanvas(64, 682, (ctx, w, h) => {
+    ctx.fillStyle = hexToCSS(THEMES[theme].spine);
+    ctx.fillRect(0, 0, w, h);
+  });
+}
+
+// ─────────────────────────────────────────
+// CARD GEOMETRY
+// ─────────────────────────────────────────
+//
+// Structure:
+//   cardRoot (pivot at world origin)
+//     spineMesh      (static center, thin box)
+//     backCoverMesh  (static left panel)
+//     frontGroup     (pivots at spine edge for opening)
+//       frontCoverMesh
+//
+// Opening: frontGroup rotates around its left edge (Y axis)
+
+const cardRoot = new THREE.Group();
+scene.add(cardRoot);
+
+// ── Shared materials (rebuilt on theme change) ──
+let coverMat, interiorMat, spineMat;
+let coverMatBack;
+
+function buildMaterials(theme) {
+  const coverTex   = makeCoverTexture(theme);
+  const interiorTex = makeInteriorTexture(theme);
+  const spineTex   = makeSpineTexture(theme);
+  const t = THEMES[theme];
+
+  // Front cover: outside face = cover texture, inside face = interior
+  coverMat = new THREE.MeshStandardMaterial({
+    map: coverTex,
+    roughness: 0.55,
+    metalness: 0.04,
+  });
+  coverMatBack = new THREE.MeshStandardMaterial({
+    map: interiorTex,
+    roughness: 0.7,
+    metalness: 0,
+  });
+  interiorMat = new THREE.MeshStandardMaterial({
+    map: interiorTex,
+    roughness: 0.75,
+    metalness: 0,
+  });
+  spineMat = new THREE.MeshStandardMaterial({
+    map: spineTex,
+    roughness: 0.5,
+    metalness: 0.06,
+  });
+}
+
+// ── Spine ──
+const spineGeo = new THREE.BoxGeometry(SPINE_W, H, D * 2);
+const spineMesh = new THREE.Mesh(spineGeo, null); // material set below
+spineMesh.castShadow = true;
+spineMesh.receiveShadow = true;
+cardRoot.add(spineMesh);
+
+// ── Back panel (left side, static) ──
+// BoxGeometry: 6 faces [right, left, top, bottom, front, back]
+const backGeo = new THREE.BoxGeometry(W, H, D);
+const backMesh = new THREE.Mesh(backGeo, null);
+backMesh.position.x = -(W / 2 + SPINE_W / 2);
+backMesh.castShadow = true;
+backMesh.receiveShadow = true;
+cardRoot.add(backMesh);
+
+// ── Front group (pivots at left edge = spine) ──
+const frontGroup = new THREE.Group();
+// The group pivot is at x = SPINE_W/2 (the spine edge)
+// The panel itself is offset so its left edge touches x=0 inside the group
+frontGroup.position.x = SPINE_W / 2;
+cardRoot.add(frontGroup);
+
+const frontGeo = new THREE.BoxGeometry(W, H, D);
+const frontMesh = new THREE.Mesh(frontGeo, null);
+// Center the panel relative to group: right edge at group origin + W, left at 0
+frontMesh.position.x = W / 2;
+frontMesh.castShadow = true;
+frontMesh.receiveShadow = true;
+frontGroup.add(frontMesh);
+
+// ── Apply materials ──
+function applyMaterials() {
+  const t = THEMES[currentTheme];
+  const edgeMat = new THREE.MeshStandardMaterial({
+    color: t.coverDark,
+    roughness: 0.6,
+    metalness: 0.05,
+  });
+
+  // BoxGeometry face order: +X, -X, +Y, -Y, +Z(front), -Z(back)
+  spineMesh.material = [
+    edgeMat, edgeMat,
+    edgeMat, edgeMat,
+    spineMat, spineMat,
+  ];
+
+  backMesh.material = [
+    edgeMat, edgeMat,
+    edgeMat, edgeMat,
+    interiorMat,   // +Z front face = inside of left panel
+    coverMat,      // -Z back face = outside back cover
+  ];
+
+  frontMesh.material = [
+    edgeMat, edgeMat,
+    edgeMat, edgeMat,
+    coverMat,      // +Z front face = outside front cover
+    coverMatBack,  // -Z back face = inside front panel
+  ];
+}
+
+buildMaterials(currentTheme);
+applyMaterials();
+
+// ─────────────────────────────────────────
+// HOLOGRAPHIC STICKERS: shader + mesh sync
+// ─────────────────────────────────────────
+const stickerGroup = new THREE.Group();
+cardRoot.add(stickerGroup);
+const stickerMeshes = new Map();
+
+function makeHoloMaterialFromImage(img) {
+  const tex = new THREE.CanvasTexture(img);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+
+  const uniforms = {
+    baseTex: { value: tex },
+    time: { value: 0 },
+    holoIntensity: { value: 1.0 },
+    opacity: { value: 1.0 }
+  };
+
+  const vs = `varying vec2 vUv; varying vec3 vNormal; varying vec3 vWorldPos; void main(){ vUv=uv; vNormal=normalize(normalMatrix*normal); vec4 wp=modelMatrix*vec4(position,1.0); vWorldPos=wp.xyz; gl_Position=projectionMatrix*viewMatrix*wp; }`;
+  const fs = `precision highp float; varying vec2 vUv; varying vec3 vNormal; varying vec3 vWorldPos; uniform sampler2D baseTex; uniform float time; uniform float holoIntensity; uniform float opacity; vec3 hsv2rgb(vec3 c){ vec3 rgb = clamp( abs(mod(c.x*6.0 + vec3(0.0,4.0,2.0),6.0)-3.0)-1.0, 0.0, 1.0 ); rgb = rgb*rgb*(3.0-2.0*rgb); return c.z * mix(vec3(1.0), rgb, c.y); } float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123);} float noise(vec2 p){ vec2 i=floor(p); vec2 f=fract(p); float a=hash(i); float b=hash(i+vec2(1.0,0.0)); float c=hash(i+vec2(0.0,1.0)); float d=hash(i+vec2(1.0,1.0)); vec2 u=f*f*(3.0-2.0*f); return mix(a,b,u.x) + (c-a)*u.y*(1.0-u.x) + (d-b)*u.x*u.y; } void main(){ vec4 base=texture2D(baseTex,vUv); vec3 viewDir=normalize(cameraPosition - vWorldPos); float fresnel=pow(1.0 - max(dot(normalize(vNormal), viewDir), 0.0), 2.5); float w = noise(vUv * 30.0 + time * 0.6); float wave = 0.5 + 0.5 * sin((vUv.x*30.0 + time*3.0) + vUv.y*12.0 + w*6.0); float hue = fract(wave*1.3 + time*0.02 + vUv.y*0.2); vec3 holo = hsv2rgb(vec3(hue, 0.85, 0.95)); vec3 mixed = mix(base.rgb, holo, fresnel * holoIntensity * (0.35 + 0.65*wave)); mixed += holo * fresnel * 0.08; gl_FragColor = vec4(mixed, base.a * opacity); }`;
+
+  const mat = new THREE.ShaderMaterial({ uniforms, vertexShader: vs, fragmentShader: fs, transparent: true });
+  return mat;
+}
+
+function syncHoloStickers() {
+  // Mark all existing as unseen
+  const seen = new Set();
+
+  for (const surface of SURFACE_ORDER) {
+    for (const o of cardDocument.surfaces[surface].objects) {
+      if (o.type !== 'image' || !o.holo) continue;
+      seen.add(o.id);
+      if (stickerMeshes.has(o.id)) {
+        // update texture if needed
+        const mesh = stickerMeshes.get(o.id);
+        if (mesh.userData.src !== (o.imageElement && o.imageElement.src)) {
+          mesh.material.dispose();
+          mesh.material = makeHoloMaterialFromImage(o.imageElement || document.createElement('canvas'));
+          mesh.userData.src = o.imageElement && o.imageElement.src;
+        }
+        // update transform
+        updateStickerTransform(mesh, surface, o);
+        continue;
+      }
+
+      // create mesh
+      const geo = new THREE.PlaneGeometry(1,1);
+      const mat = makeHoloMaterialFromImage(o.imageElement || document.createElement('canvas'));
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.renderOrder = 50; // ensure drawn on top
+      mesh.userData = { id: o.id, src: o.imageElement && o.imageElement.src };
+      stickerGroup.add(mesh);
+      stickerMeshes.set(o.id, mesh);
+      updateStickerTransform(mesh, surface, o);
+    }
+  }
+
+  // remove deleted
+  for (const id of Array.from(stickerMeshes.keys())) {
+    if (!seen.has(id)) {
+      const m = stickerMeshes.get(id);
+      if (m) { stickerGroup.remove(m); if (m.material) m.material.dispose(); m.geometry.dispose(); }
+      stickerMeshes.delete(id);
+    }
+  }
+}
+
+function updateStickerTransform(mesh, surface, o) {
+  // Convert design-space (DESIGN_W x DESIGN_H) to world units (W x H)
+  const localX = (o.x - DESIGN_W/2) / DESIGN_W * W;
+  const localY = -(o.y - DESIGN_H/2) / DESIGN_H * H;
+  const worldZOffset = D/2 + 0.002;
+
+  if (surface === 'front') {
+    // parent to frontGroup so it opens with the cover
+    mesh.parent = frontGroup;
+    mesh.position.set(frontMesh.position.x + localX, localY, worldZOffset);
+    mesh.rotation.set(0,0,0);
+    mesh.scale.set((o.width / DESIGN_W) * W, (o.height / DESIGN_H) * H, 1);
+  } else if (surface === 'back') {
+    mesh.parent = cardRoot;
+    mesh.position.set(backMesh.position.x + localX, localY, - (D/2 + 0.002));
+    mesh.rotation.set(0,Math.PI,0);
+    mesh.scale.set((o.width / DESIGN_W) * W, (o.height / DESIGN_H) * H, 1);
+  } else {
+    // default place relative to cardRoot center for other surfaces
+    mesh.parent = cardRoot;
+    mesh.position.set(localX, localY, 0.01);
+    mesh.rotation.set(0,0,0);
+    mesh.scale.set((o.width / DESIGN_W) * W, (o.height / DESIGN_H) * H, 1);
+  }
+}
+
+// update stickers each time the editor renders textures
+const originalRenderAllSurfaceTextures = renderAllSurfaceTextures;
+renderAllSurfaceTextures = function() { originalRenderAllSurfaceTextures(); syncHoloStickers(); };
+
+
+// ─────────────────────────────────────────
+// OPEN / CLOSE ANIMATION
+// ─────────────────────────────────────────
+let isOpen = false;
+let openProgress = 0; // 0 = closed, 1 = open
+const TARGET_OPEN_ANGLE = -Math.PI * 0.96; // slightly less than 180°
+
+function setOpenProgress(p) {
+  openProgress = p;
+  frontGroup.rotation.y = TARGET_OPEN_ANGLE * p;
+
+  // Interior light fades in as card opens
+  interiorLight.intensity = p * 1.4;
+
+  // Raise the card slightly as it opens (feels natural)
+  cardRoot.position.y = Math.sin(p * Math.PI) * 0.08;
+}
+
+let openAnim = null;
+function animateTo(target, duration = 900) {
+  if (openAnim) cancelAnimationFrame(openAnim.id);
+  const start = openProgress;
+  const startTime = performance.now();
+  function step(now) {
+    const t = Math.min((now - startTime) / duration, 1);
+    // Ease in-out cubic
+    const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    setOpenProgress(start + (target - start) * ease);
+    if (t < 1) openAnim = { id: requestAnimationFrame(step) };
+  }
+  openAnim = { id: requestAnimationFrame(step) };
+}
+
+// ─────────────────────────────────────────
+// CLICK TO OPEN (raycasting)
+// ─────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let mouseDownPos = { x: 0, y: 0 };
+
+renderer.domElement.addEventListener('mousedown', e => {
+  mouseDownPos = { x: e.clientX, y: e.clientY };
+});
+
+renderer.domElement.addEventListener('click', e => {
+  // Ignore if user dragged (orbit)
+  const dx = e.clientX - mouseDownPos.x;
+  const dy = e.clientY - mouseDownPos.y;
+  if (Math.sqrt(dx*dx + dy*dy) > 5) return;
+
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+
+  const hits = raycaster.intersectObjects([frontMesh, backMesh, spineMesh], false);
+  if (hits.length > 0) {
+    isOpen = !isOpen;
+    animateTo(isOpen ? 1 : 0);
+    document.getElementById('btn-open').textContent = isOpen ? 'Close Card' : 'Open Card';
+    document.getElementById('btn-open').classList.toggle('active', isOpen);
+  }
+});
+
+// ─────────────────────────────────────────
+// BUTTONS
+// ─────────────────────────────────────────
+document.getElementById('btn-open').addEventListener('click', () => {
+  isOpen = !isOpen;
+  animateTo(isOpen ? 1 : 0);
+  document.getElementById('btn-open').textContent = isOpen ? 'Close Card' : 'Open Card';
+  document.getElementById('btn-open').classList.toggle('active', isOpen);
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  // Smooth camera reset
+  const startPos = camera.position.clone();
+  const targetPos = new THREE.Vector3(0, 1.2, 5.5);
+  const startTarget = controls.target.clone();
+  const t0 = performance.now();
+  function resetStep(now) {
+    const p = Math.min((now - t0) / 600, 1);
+    const e = 1 - Math.pow(1 - p, 3);
+    camera.position.lerpVectors(startPos, targetPos, e);
+    controls.target.lerpVectors(startTarget, new THREE.Vector3(0, 0, 0), e);
+    controls.update();
+    if (p < 1) requestAnimationFrame(resetStep);
+  }
+  requestAnimationFrame(resetStep);
+});
+
+let themeIdx = 0;
+// ─────────────────────────────────────────
+// GENTLE IDLE FLOAT
+// ─────────────────────────────────────────
+let idleTime = 0;
+let userInteracting = false;
+
+renderer.domElement.addEventListener('mousedown', () => { userInteracting = true; });
+renderer.domElement.addEventListener('mouseup',   () => { setTimeout(() => userInteracting = false, 200); });
+
+// ─────────────────────────────────────────
+// RENDER LOOP
+// ─────────────────────────────────────────
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const delta = clock.getDelta();
+  idleTime += delta;
+  controls.update();
+
+  // Gentle float when not interacting and card is closed
+  if (!userInteracting && !isOpen) {
+    const floatY = Math.sin(idleTime * 0.5) * 0.04;
+    const floatRot = Math.sin(idleTime * 0.35) * 0.018;
+    cardRoot.position.y += (floatY - cardRoot.position.y) * 0.05;
+    cardRoot.rotation.z += (floatRot - cardRoot.rotation.z) * 0.03;
+  } else if (!isOpen) {
+    cardRoot.rotation.z *= 0.95; // damp
+  }
+
+  renderer.render(scene, camera);
+}
+animate();
+
+// ─────────────────────────────────────────
+// RESIZE
+// ─────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ─────────────────────────────────────────
+// CARD SURFACE EDITOR
+// ─────────────────────────────────────────
+const DESIGN_W = 750;
+const DESIGN_H = 1000;
+
+const editorPanel = document.getElementById('editor-panel');
+const editorCanvas = document.getElementById('editor-canvas');
+const interactionCanvas = document.getElementById('interaction-canvas');
+const ectx = editorCanvas.getContext('2d');
+const ictx = interactionCanvas.getContext('2d');
+
+editorCanvas.width = interactionCanvas.width = DESIGN_W;
+editorCanvas.height = interactionCanvas.height = DESIGN_H;
+
+const SURFACE_ORDER = ['front', 'insideLeft', 'insideRight', 'back'];
+const SURFACE_INFO = {
+  front: 'Front Cover',
+  insideLeft: 'Inside Left',
+  insideRight: 'Inside Right',
+  back: 'Back Cover'
+};
+
+// Every surface has its OWN material and texture.
+// Nothing is shared between the four editable surfaces.
+const surfaceMaterials = {};
+const surfaceBaseImages = {};
+const surfaceTextures = {};
+const surfaceCanvases = {};
+
+/*
+  IMPORTANT:
+  Each physical face gets its own composite canvas and its own THREE material.
+  The original artwork is copied into that canvas first, then user objects are
+  drawn on top. We never leave a face pointing at an empty/transparent canvas.
+*/
+function installEditorMaterials() {
+  // Keep the original Three.js materials live until Edit Mode is opened.
+  surfaceMaterials.front = coverMat.clone();
+  surfaceMaterials.insideRight = coverMatBack.clone();
+  surfaceMaterials.insideLeft = interiorMat.clone();
+  surfaceMaterials.back = coverMat.clone();
+
+  surfaceBaseImages.front = coverMat.map?.image || null;
+  surfaceBaseImages.insideRight = coverMatBack.map?.image || null;
+  surfaceBaseImages.insideLeft = interiorMat.map?.image || null;
+  surfaceBaseImages.back = coverMat.map?.image || null;
+
+  for (const surface of SURFACE_ORDER) {
+    let c = surfaceCanvases[surface];
+    if (!c) c = surfaceCanvases[surface] = document.createElement('canvas');
+    c.width = DESIGN_W;
+    c.height = DESIGN_H;
+
+    let tex = surfaceTextures[surface];
+    if (!tex) tex = surfaceTextures[surface] = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.generateMipmaps = false;
+
+    surfaceMaterials[surface].map = tex;
+    surfaceMaterials[surface].transparent = false;
+    surfaceMaterials[surface].needsUpdate = true;
+  }
+
+  // Populate the four editable composite textures, without touching the card.
+  renderAllSurfaceTextures();
+}
+
+function activateEditorMaterials() {
+  frontMesh.material[4] = surfaceMaterials.front;
+  frontMesh.material[5] = surfaceMaterials.insideRight;
+  backMesh.material[4] = surfaceMaterials.insideLeft;
+  backMesh.material[5] = surfaceMaterials.back;
+  for (const surface of SURFACE_ORDER) {
+    surfaceMaterials[surface].needsUpdate = true;
+    surfaceTextures[surface].needsUpdate = true;
+  }
+}
+
+function drawBaseToContext(ctx, surface) {
+  const base = surfaceBaseImages[surface];
+  if (base && base.width && base.height) {
+    ctx.drawImage(base, 0, 0, DESIGN_W, DESIGN_H);
+  } else {
+    // Never allow an empty/black texture to replace the card.
+    const t = THEMES[currentTheme];
+    ctx.fillStyle = surface === 'front' || surface === 'back'
+      ? hexToCSS(t.cover)
+      : hexToCSS(t.interior);
+    ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
+  }
+}
+
+function renderSurfaceToCanvas(surface) {
+  const c = surfaceCanvases[surface];
+  if (!c) return;
+
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, DESIGN_W, DESIGN_H);
+  drawBaseToContext(ctx, surface);
+
+  for (const o of cardDocument.surfaces[surface].objects) {
+    if (o.type === 'stroke') drawStrokeObject(ctx, o);
+    else if (o.type === 'text') drawTextObject(ctx, o);
+    else if (o.type === 'image') drawImageObject(ctx, o);
+  }
+
+  surfaceTextures[surface].needsUpdate = true;
+}
+
+function renderAllSurfaceTextures() {
+  if (!Object.keys(cardDocument.surfaces).length) return;
+  for (const surface of SURFACE_ORDER) {
+    renderSurfaceToCanvas(surface);
+  }
+}
+
+const cardDocument = {
+  version: 2,
+  surfaces: {
+    front: { objects: [] },
+    insideLeft: { objects: [] },
+    insideRight: { objects: [] },
+    back: { objects: [] }
+  }
+};
+
+const STORAGE_KEY = 'carta-card-document-v3';
+
+function serializeDocument() {
+  return {
+    version: cardDocument.version,
+    surfaces: Object.fromEntries(
+      SURFACE_ORDER.map(s => [
+        s,
+        { objects: cardDocument.surfaces[s].objects.map(o => {
+          const copy = {...o};
+          delete copy.imageElement;
+          return copy;
+        })}
+      ])
+    )
+  };
+}
+
+function saveDocumentToStorage() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeDocument()));
+  } catch (err) {
+    console.warn('Could not save card document:', err);
+  }
+}
+
+function loadDocumentFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    const saved = JSON.parse(raw);
+
+    for (const surface of SURFACE_ORDER) {
+      cardDocument.surfaces[surface].objects =
+        saved.surfaces?.[surface]?.objects || [];
+    }
+
+    // Rehydrate uploaded images.
+    for (const surface of SURFACE_ORDER) {
+      for (const o of cardDocument.surfaces[surface].objects) {
+        if (o.type === 'image' && o.src) {
+          const img = new Image();
+          img.onload = () => renderEditor();
+          img.src = o.src;
+          o.imageElement = img;
+        }
+      }
+    }
+    return true;
+  } catch (err) {
+    console.warn('Could not load saved card document:', err);
+    return false;
+  }
+}
+
+// Existing artwork remains the base layer. User-created content sits above it.
+// This prevents duplicate "Sarah"/message text and guarantees the editor preview
+// is the same artwork that is actually on the card.
+loadDocumentFromStorage();
+
+let activeSurface = 'front';
+let activeTool = 'select';
+let selectedObjectId = null;
+let drawingStroke = null;
+let dragState = null;
+let history = [];
+let historyIndex = -1;
+let editorIsOpen = false;
+
+const brushCursor = document.createElement('div');
+brushCursor.id = 'brush-cursor';
+brushCursor.className = 'hidden';
+document.body.appendChild(brushCursor);
+
+function currentObjects() {
+  return cardDocument.surfaces[activeSurface].objects;
+}
+
+function cloneDocument() {
+  return JSON.parse(JSON.stringify(serializeDocument()));
+}
+
+function restoreDocument(snapshot) {
+  for (const surface of SURFACE_ORDER) {
+    cardDocument.surfaces[surface].objects = snapshot.surfaces?.[surface]?.objects || [];
+    for (const o of cardDocument.surfaces[surface].objects) {
+      if (o.type === 'image' && o.src) {
+        const img = new Image();
+        img.onload = () => renderEditor();
+        img.src = o.src;
+        o.imageElement = img;
+      }
+    }
+  }
+  selectedObjectId = null;
+  saveDocumentToStorage();
+  renderEditor();
+  updateHistoryButtons();
+}
+
+function saveHistory() {
+  history = history.slice(0, historyIndex + 1);
+  history.push(cloneDocument());
+  if (history.length > 50) history.shift();
+  historyIndex = history.length - 1;
+  saveDocumentToStorage();
+  updateHistoryButtons();
+}
+
+function undo() {
+  if (historyIndex <= 0) return;
+  historyIndex--;
+  restoreDocument(history[historyIndex]);
+}
+
+function redo() {
+  if (historyIndex >= history.length - 1) return;
+  historyIndex++;
+  restoreDocument(history[historyIndex]);
+}
+
+function updateHistoryButtons() {
+  document.getElementById('undo-btn').disabled = historyIndex <= 0;
+  document.getElementById('redo-btn').disabled = historyIndex >= history.length - 1;
+}
+
+function getSelectedObject() {
+  return currentObjects().find(o => o.id === selectedObjectId) || null;
+}
+
+function drawTextObject(ctx, o) {
+  ctx.save();
+  ctx.translate(o.x, o.y);
+  ctx.rotate(o.rotation || 0);
+  ctx.globalAlpha = o.opacity ?? 1;
+  ctx.fillStyle = o.color || '#111';
+  ctx.textAlign = o.align || 'center';
+  ctx.textBaseline = 'middle';
+
+  const italic = o.italic ? 'italic ' : '';
+  ctx.font = `${italic}${o.fontWeight || 400} ${o.fontSize || 48}px ${o.fontFamily || 'Georgia'}`;
+
+  const lines = String(o.text || '').split('\n');
+  const lineHeight = (o.fontSize || 48) * 1.22;
+  const start = -(lines.length - 1) * lineHeight / 2;
+
+  lines.forEach((line, i) => ctx.fillText(line, 0, start + i * lineHeight));
+  ctx.restore();
+}
+
+function drawStrokeObject(ctx, o) {
+  if (!o.points || o.points.length < 2) return;
+  ctx.save();
+  ctx.globalAlpha = o.opacity ?? 1;
+  ctx.strokeStyle = o.color || '#000';
+  ctx.lineWidth = o.width || 6;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+
+  ctx.moveTo(o.points[0].x, o.points[0].y);
+  for (let i = 1; i < o.points.length; i++) {
+    const p = o.points[i];
+    const prev = o.points[i - 1];
+    const mx = (prev.x + p.x) / 2;
+    const my = (prev.y + p.y) / 2;
+    ctx.quadraticCurveTo(prev.x, prev.y, mx, my);
+  }
+  const last = o.points[o.points.length - 1];
+  ctx.lineTo(last.x, last.y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawImageObject(ctx, o) {
+  if (!o.imageElement || !o.imageElement.complete || !o.imageElement.naturalWidth) return;
+  ctx.save();
+  ctx.translate(o.x, o.y);
+  ctx.rotate(o.rotation || 0);
+  ctx.globalAlpha = o.opacity ?? 1;
+  ctx.drawImage(o.imageElement, -o.width / 2, -o.height / 2, o.width, o.height);
+  ctx.restore();
+}
+
+function objectBounds(o) {
+  if (o.type === 'image') {
+    return {x:o.x-o.width/2, y:o.y-o.height/2, w:o.width, h:o.height};
+  }
+
+  if (o.type === 'text') {
+    const c = document.createElement('canvas').getContext('2d');
+    c.font = `${o.fontWeight || 400} ${o.fontSize || 48}px ${o.fontFamily || 'Georgia'}`;
+    const lines = String(o.text || '').split('\n');
+    const width = Math.max(30, ...lines.map(line => c.measureText(line).width));
+    const height = lines.length * (o.fontSize || 48) * 1.22;
+    return {x:o.x-width/2, y:o.y-height/2, w:width, h:height};
+  }
+
+  if (o.type === 'stroke') {
+    const xs=o.points.map(p=>p.x), ys=o.points.map(p=>p.y);
+    const minX=Math.min(...xs), maxX=Math.max(...xs);
+    const minY=Math.min(...ys), maxY=Math.max(...ys);
+    const pad=(o.width || 6)/2;
+    return {x:minX-pad,y:minY-pad,w:maxX-minX+pad*2,h:maxY-minY+pad*2};
+  }
+
+  return {x:o.x||0,y:o.y||0,w:1,h:1};
+}
+
+function hitTest(o, x, y) {
+  const b = objectBounds(o);
+  return x >= b.x && x <= b.x+b.w && y >= b.y && y <= b.y+b.h;
+}
+
+function selectedHandleHit(o,p) {
+  if (!o || o.type !== 'image') return null;
+  const b=objectBounds(o), s=24;
+  const corners={nw:[b.x,b.y],ne:[b.x+b.w,b.y],sw:[b.x,b.y+b.h],se:[b.x+b.w,b.y+b.h]};
+  for (const [name,[x,y]] of Object.entries(corners)) {
+    if (Math.abs(p.x-x)<s && Math.abs(p.y-y)<s) return name;
+  }
+  return null;
+}
+
+function drawSelection() {
+  ictx.clearRect(0,0,DESIGN_W,DESIGN_H);
+  const o=getSelectedObject();
+  if (!o) return;
+
+  const b=objectBounds(o);
+  ictx.save();
+  ictx.strokeStyle='#c9a84c';
+  ictx.lineWidth=3;
+  ictx.setLineDash([8,5]);
+  ictx.strokeRect(b.x,b.y,b.w,b.h);
+  ictx.setLineDash([]);
+
+  if (o.type === 'image') {
+    const s=13;
+    for (const [x,y] of [[b.x,b.y],[b.x+b.w,b.y],[b.x,b.y+b.h],[b.x+b.w,b.y+b.h]]) {
+      ictx.fillStyle='#fff';
+      ictx.strokeStyle='#c9a84c';
+      ictx.lineWidth=2;
+      ictx.fillRect(x-s/2,y-s/2,s,s);
+      ictx.strokeRect(x-s/2,y-s/2,s,s);
+    }
+  }
+  ictx.restore();
+}
+
+function getBaseImage(surface) {
+  return surfaceBaseImages[surface];
+}
+
+function renderEditor() {
+  ectx.clearRect(0, 0, DESIGN_W, DESIGN_H);
+
+  // The editor always shows the same base artwork used by the physical face.
+  drawBaseToContext(ectx, activeSurface);
+
+  for (const o of currentObjects()) {
+    if (o.type === 'stroke') drawStrokeObject(ectx, o);
+    else if (o.type === 'text') drawTextObject(ectx, o);
+    else if (o.type === 'image') drawImageObject(ectx, o);
+  }
+
+  drawSelection();
+
+  // Keep the selected surface and all other surfaces live on the 3D card.
+  renderAllSurfaceTextures();
+  const sel = getSelectedObject();
+  document.getElementById('toggle-holo-obj').classList.toggle('active', sel && sel.type==='image' && !!sel.holo);
+}
+
+function editorPoint(e) {
+  const r=interactionCanvas.getBoundingClientRect();
+  return {
+    x:(e.clientX-r.left)*DESIGN_W/r.width,
+    y:(e.clientY-r.top)*DESIGN_H/r.height
+  };
+}
+
+function updateBrushCursor(e) {
+  if (activeTool !== 'draw' || !editorIsOpen) {
+    brushCursor.classList.add('hidden');
+    return;
+  }
+
+  const size=+document.getElementById('draw-size').value;
+  const r=interactionCanvas.getBoundingClientRect();
+  brushCursor.classList.remove('hidden');
+  brushCursor.style.width=`${Math.max(4,size*r.width/DESIGN_W)}px`;
+  brushCursor.style.height=`${Math.max(4,size*r.height/DESIGN_W)}px`;
+  brushCursor.style.left=`${e.clientX}px`;
+  brushCursor.style.top=`${e.clientY}px`;
+  brushCursor.style.borderColor=document.getElementById('draw-color').value;
+}
+
+interactionCanvas.addEventListener('pointermove', e => {
+  updateBrushCursor(e);
+  const p=editorPoint(e);
+
+  if (activeTool==='draw' && drawingStroke) {
+    const last=drawingStroke.points[drawingStroke.points.length-1];
+    if (Math.hypot(p.x-last.x,p.y-last.y)>1) {
+      drawingStroke.points.push(p);
+      renderEditor();
+    }
+    return;
+  }
+
+  if (!dragState) return;
+  const o=getSelectedObject();
+  if (!o) return;
+
+  if (dragState.mode==='move') {
+    o.x=dragState.start.x+(p.x-dragState.startX);
+    o.y=dragState.start.y+(p.y-dragState.startY);
+  } else if (dragState.mode==='resize' && o.type==='image') {
+    const dx=p.x-dragState.startX, dy=p.y-dragState.startY;
+    const s=dragState.start;
+    const min=30;
+
+    if (dragState.handle==='se') {
+      o.width=Math.max(min,s.width+dx); o.height=Math.max(min,s.height+dy);
+    }
+    if (dragState.handle==='sw') {
+      o.width=Math.max(min,s.width-dx); o.height=Math.max(min,s.height+dy);
+      o.x=s.x+dx/2;
+    }
+    if (dragState.handle==='ne') {
+      o.width=Math.max(min,s.width+dx); o.height=Math.max(min,s.height-dy);
+      o.x=s.x+dx/2; o.y=s.y+dy/2;
+    }
+    if (dragState.handle==='nw') {
+      o.width=Math.max(min,s.width-dx); o.height=Math.max(min,s.height-dy);
+      o.x=s.x+dx/2; o.y=s.y+dy/2;
+    }
+  }
+
+  renderEditor();
+});
+
+interactionCanvas.addEventListener('pointerleave', () => {
+  if (!drawingStroke) brushCursor.classList.add('hidden');
+});
+
+interactionCanvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  interactionCanvas.setPointerCapture(e.pointerId);
+  const p=editorPoint(e);
+
+  if (activeTool==='draw') {
+    drawingStroke={
+      id:crypto.randomUUID(),
+      type:'stroke',
+      points:[p],
+      color:document.getElementById('draw-color').value,
+      width:+document.getElementById('draw-size').value,
+      opacity:+document.getElementById('draw-opacity').value
+    };
+    currentObjects().push(drawingStroke);
+    renderEditor();
+    return;
+  }
+
+  if (activeTool==='text') {
+    addTextAt(p.x,p.y);
+    return;
+  }
+
+  const selected=getSelectedObject();
+  const handle=selectedHandleHit(selected,p);
+
+  if (handle) {
+    dragState={
+      mode:'resize',
+      handle,
+      startX:p.x,startY:p.y,
+      start:{x:selected.x,y:selected.y,width:selected.width,height:selected.height}
+    };
+    return;
+  }
+
+  let hit=null;
+  for (let i=currentObjects().length-1;i>=0;i--) {
+    if (hitTest(currentObjects()[i],p.x,p.y)) {
+      hit=currentObjects()[i];
+      break;
+    }
+  }
+
+  if (hit) {
+    selectedObjectId=hit.id;
+    dragState={mode:'move',startX:p.x,startY:p.y,start:{x:hit.x,y:hit.y}};
+  } else {
+    selectedObjectId=null;
+    dragState=null;
+  }
+
+  renderEditor();
+});
+
+interactionCanvas.addEventListener('pointerup', e => {
+  if (drawingStroke) {
+    drawingStroke=null;
+    saveHistory();
+  } else if (dragState) {
+    dragState=null;
+    saveHistory();
+  }
+  try { interactionCanvas.releasePointerCapture(e.pointerId); } catch {}
+  renderEditor();
+});
+
+interactionCanvas.addEventListener('dblclick', e => {
+  const p=editorPoint(e);
+  const hit=[...currentObjects()].reverse().find(o=>hitTest(o,p.x,p.y));
+  if (!hit || hit.type!=='text') return;
+
+  selectedObjectId=hit.id;
+  const overlay=document.getElementById('text-input-overlay');
+  const input=document.getElementById('text-input');
+  overlay.classList.remove('hidden');
+  overlay.dataset.editId=hit.id;
+  input.value=hit.text;
+  document.getElementById('text-font').value=hit.fontFamily || 'Georgia';
+  document.getElementById('text-size').value=hit.fontSize || 56;
+  document.getElementById('text-weight').value=hit.fontWeight || '400';
+  document.getElementById('text-color').value=hit.color || '#1a2e1f';
+  input.focus();
+});
+
+function addTextAt(x,y) {
+  const overlay=document.getElementById('text-input-overlay');
+  overlay.classList.remove('hidden');
+  delete overlay.dataset.editId;
+  overlay.dataset.x=x;
+  overlay.dataset.y=y;
+  document.getElementById('text-input').value='';
+  document.getElementById('text-input').focus();
+}
+
+function commitText() {
+  const overlay=document.getElementById('text-input-overlay');
+  const text=document.getElementById('text-input').value.trim();
+  if (!text) { cancelText(); return; }
+
+  const existingId=overlay.dataset.editId;
+  if (existingId) {
+    const o=currentObjects().find(x=>x.id===existingId);
+    if (o) {
+      o.text=text;
+      o.fontFamily=document.getElementById('text-font').value;
+      o.fontSize=+document.getElementById('text-size').value;
+      o.fontWeight=document.getElementById('text-weight').value;
+      o.color=document.getElementById('text-color').value;
+    }
+  } else {
+    const o={
+      id:crypto.randomUUID(),type:'text',text,
+      x:+overlay.dataset.x,y:+overlay.dataset.y,
+      fontFamily:document.getElementById('text-font').value,
+      fontSize:+document.getElementById('text-size').value,
+      fontWeight:document.getElementById('text-weight').value,
+      color:document.getElementById('text-color').value,
+      align:'center',rotation:0,opacity:1
+    };
+    currentObjects().push(o);
+    selectedObjectId=o.id;
+  }
+
+  cancelText();
+  saveHistory();
+  renderEditor();
+}
+
+function cancelText() {
+  document.getElementById('text-input-overlay').classList.add('hidden');
+  delete document.getElementById('text-input-overlay').dataset.editId;
+}
+
+document.getElementById('text-add').addEventListener('click',commitText);
+document.getElementById('text-cancel').addEventListener('click',cancelText);
+
+document.getElementById('image-input').addEventListener('change',e=>{
+  const file=e.target.files?.[0];
+  if (!file) return;
+
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const img=new Image();
+    img.onload=()=>{
+      const maxW=520,maxH=420;
+      const scale=Math.min(maxW/img.width,maxH/img.height,1);
+
+      const o={
+        id:crypto.randomUUID(),
+        type:'image',
+        src:ev.target.result,
+        x:DESIGN_W/2,y:DESIGN_H/2,
+        width:img.width*scale,height:img.height*scale,
+        rotation:0,opacity:1,
+        imageElement:img
+      };
+
+      currentObjects().push(o);
+      selectedObjectId=o.id;
+      saveHistory();
+      renderEditor();
+    };
+    img.src=ev.target.result;
+  };
+  reader.readAsDataURL(file);
+  e.target.value='';
+});
+
+document.querySelectorAll('.tool-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    activeTool=btn.dataset.tool;
+
+    document.querySelectorAll('.tool-btn').forEach(b=>b.classList.toggle('active',b===btn));
+    document.getElementById('draw-controls').classList.toggle('hidden',activeTool!=='draw');
+    document.getElementById('text-controls').classList.toggle('hidden',activeTool!=='text');
+
+    if (activeTool==='image') {
+      document.getElementById('image-input').click();
+      activeTool='select';
+      document.querySelectorAll('.tool-btn').forEach(b=>b.classList.toggle('active',b.dataset.tool==='select'));
+    }
+
+    interactionCanvas.style.cursor=activeTool==='draw'?'none':activeTool==='text'?'text':'default';
+    brushCursor.classList.toggle('hidden',activeTool!=='draw');
+  });
+});
+
+document.getElementById('draw-size').addEventListener('input',e=>{
+  document.getElementById('draw-size-value').textContent=e.target.value;
+});
+
+document.getElementById('draw-size').addEventListener('input',()=>updateBrushCursor({clientX:lastPointerX,clientY:lastPointerY}));
+document.getElementById('draw-color').addEventListener('input',()=>updateBrushCursor({clientX:lastPointerX,clientY:lastPointerY}));
+
+let lastPointerX=0,lastPointerY=0;
+interactionCanvas.addEventListener('pointermove', e => {
+  lastPointerX=e.clientX;
+  lastPointerY=e.clientY;
+  updateBrushCursor(e);
+}, {capture:true});
+
+document.getElementById('undo-btn').addEventListener('click',undo);
+document.getElementById('redo-btn').addEventListener('click',redo);
+
+document.getElementById('delete-btn').addEventListener('click',()=>{
+  if (!selectedObjectId) return;
+  const i=currentObjects().findIndex(o=>o.id===selectedObjectId);
+  if (i>=0) currentObjects().splice(i,1);
+  selectedObjectId=null;
+  saveHistory();
+  renderEditor();
+});
+
+document.getElementById('toggle-holo-obj').addEventListener('click',()=>{
+  const o = getSelectedObject();
+  if (!o || o.type !== 'image') return;
+  o.holo = !o.holo;
+  // update UI active state
+  document.getElementById('toggle-holo-obj').classList.toggle('active', !!o.holo);
+  saveHistory();
+  renderEditor();
+  syncHoloStickers();
+});
+
+document.getElementById('clear-btn').addEventListener('click',()=>{
+  if (!currentObjects().length) return;
+  currentObjects().length=0;
+  selectedObjectId=null;
+  saveHistory();
+  renderEditor();
+});
+
+function setSurface(surface) {
+  activeSurface=surface;
+  selectedObjectId=null;
+  document.getElementById('surface-select').value=surface;
+  renderEditor();
+}
+
+document.getElementById('surface-select').addEventListener('change',e=>setSurface(e.target.value));
+
+document.getElementById('surface-prev').addEventListener('click',()=>{
+  const i=SURFACE_ORDER.indexOf(activeSurface);
+  setSurface(SURFACE_ORDER[(i-1+SURFACE_ORDER.length)%SURFACE_ORDER.length]);
+});
+
+document.getElementById('surface-next').addEventListener('click',()=>{
+  const i=SURFACE_ORDER.indexOf(activeSurface);
+  setSurface(SURFACE_ORDER[(i+1)%SURFACE_ORDER.length]);
+});
+
+// ── Move the 3D preview left while editing ──
+let cameraEditOffset = 0;
+let editorCameraShift = 0;
+
+function setEditorCameraPosition(open) {
+  const desired = open
+    ? Math.min(0.95, Math.max(0.55, window.innerWidth / 1100))
+    : 0;
+
+  const delta = desired - editorCameraShift;
+  if (Math.abs(delta) < 0.001) return;
+
+  camera.position.x += delta;
+  controls.target.x += delta;
+  editorCameraShift = desired;
+  camera.updateProjectionMatrix();
+}
+
+function openEditor() {
+  if (editorIsOpen) return;
+  editorIsOpen=true;
+  editorPanel.classList.add('open');
+  document.getElementById('btn-edit').classList.add('active');
+
+  // Only now replace the four live faces with their editable composite textures.
+  activateEditorMaterials();
+
+  // Wait for the panel to establish its layout, then move the 3D view left.
+  requestAnimationFrame(()=>{
+    setEditorCameraPosition(true);
+    resizeEditorStage();
+    renderAllSurfaceTextures();
+    renderEditor();
+  });
+}
+
+function closeEditor() {
+  if (!editorIsOpen) return;
+  editorIsOpen=false;
+  editorPanel.classList.remove('open');
+  document.getElementById('btn-edit').classList.remove('active');
+  selectedObjectId=null;
+  activeTool='select';
+  document.querySelectorAll('.tool-btn').forEach(b=>b.classList.toggle('active',b.dataset.tool==='select'));
+  document.getElementById('draw-controls').classList.add('hidden');
+  document.getElementById('text-controls').classList.add('hidden');
+  brushCursor.classList.add('hidden');
+
+  // "Done" means leave editing mode. The document itself remains saved.
+  saveDocumentToStorage();
+  renderAllSurfaceTextures();
+  setEditorCameraPosition(false);
+}
+
+document.getElementById('btn-edit').addEventListener('click',()=>{
+  editorIsOpen ? closeEditor() : openEditor();
+});
+document.getElementById('btn-close-editor').addEventListener('click',closeEditor);
+
+// Keyboard shortcuts
+document.addEventListener('keydown',e=>{
+  const tag=document.activeElement?.tagName;
+  if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==='z') {
+    e.preventDefault();
+    e.shiftKey ? redo() : undo();
+  }
+  if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==='y') {
+    e.preventDefault();
+    redo();
+  }
+  if ((e.key==='Delete'||e.key==='Backspace') && !['INPUT','TEXTAREA','SELECT'].includes(tag)) {
+    document.getElementById('delete-btn').click();
+  }
+});
+
+// ── Editor stage sizing ──
+function resizeEditorStage() {
+  const wrap=document.querySelector('.editor-canvas-wrap');
+  const stage=document.getElementById('editor-stage');
+  if (!wrap || !stage) return;
+
+  const availableW=Math.max(120,wrap.clientWidth-24);
+  const availableH=Math.max(160,wrap.clientHeight-24);
+  const scale=Math.min(availableW/DESIGN_W,availableH/DESIGN_H);
+  stage.style.width=`${DESIGN_W*scale}px`;
+  stage.style.height=`${DESIGN_H*scale}px`;
+}
+
+window.addEventListener('resize',()=>{
+  if (editorIsOpen) requestAnimationFrame(resizeEditorStage);
+});
+
+// The original theme button rebuilds the base materials.
+// Reinstall four independent surface materials afterward.
+document.getElementById('btn-theme').addEventListener('click',()=>{
+  themeIdx=(themeIdx+1)%themeKeys.length;
+  currentTheme=themeKeys[themeIdx];
+  document.getElementById('btn-theme').textContent=currentTheme;
+
+  buildMaterials(currentTheme);
+  applyMaterials();
+  installEditorMaterials();
+  if (editorIsOpen) activateEditorMaterials();
+  renderAllSurfaceTextures();
+  renderEditor();
+});
+
+// Initialize four distinct surfaces.
+installEditorMaterials();
+
+// A saved history snapshot is created only after the document is loaded.
+history=[cloneDocument()];
+historyIndex=0;
+updateHistoryButtons();
+renderEditor();
+resizeEditorStage();
+
+</script>
+</body>
+</html>

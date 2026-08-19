@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Carta — 3D Card Engine</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0e0d0b; overflow: hidden; font-family: system-ui, sans-serif; }
+canvas { display: block; }
+
+#ui {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 0.75rem;
+  z-index: 10;
+}
+button {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.75);
+  padding: 0.55rem 1.2rem;
+  border-radius: 100px;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: all 0.2s;
+  backdrop-filter: blur(8px);
+}
+button:hover {
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+  border-color: rgba(255,255,255,0.22);
+}
+button.active {
+  background: rgba(201,168,76,0.18);
+  border-color: rgba(201,168,76,0.45);
+  color: #c9a84c;
+}
+
+#hint {
+  position: fixed;
+  top: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.25);
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+
+<div id="hint">Drag to spin &nbsp;·&nbsp; Click card to open</div>
+
+<div id="ui">
+  <button id="btn-open">Open Card</button>
+  <button id="btn-reset">Reset View</button>
+  <button id="btn-theme" class="active">Botanical</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ─────────────────────────────────────────
+// SCENE SETUP
+// ─────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0e0d0b);
+scene.fog = new THREE.Fog(0x0e0d0b, 12, 22);
+
+const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.01, 100);
+camera.position.set(0, 1.2, 5.5);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.055;
+controls.rotateSpeed = 0.65;
+controls.enablePan = false;
+controls.minDistance = 3;
+controls.maxDistance = 9;
+controls.minPolarAngle = 0.3;
+controls.maxPolarAngle = Math.PI * 0.7;
+controls.target.set(0, 0, 0);
+
+// ─────────────────────────────────────────
+// LIGHTING
+// ─────────────────────────────────────────
+
+// Ambient — warm fill
+const ambient = new THREE.AmbientLight(0xffe8c8, 0.35);
+scene.add(ambient);
+
+// Key light — warm from top-right
+const keyLight = new THREE.DirectionalLight(0xfff5e0, 2.2);
+keyLight.position.set(3, 5, 4);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(2048, 2048);
+keyLight.shadow.camera.near = 0.1;
+keyLight.shadow.camera.far = 20;
+keyLight.shadow.camera.left = -5;
+keyLight.shadow.camera.right = 5;
+keyLight.shadow.camera.top = 5;
+keyLight.shadow.camera.bottom = -5;
+keyLight.shadow.bias = -0.0003;
+keyLight.shadow.normalBias = 0.02;
+scene.add(keyLight);
+
+// Fill light — cool from left
+const fillLight = new THREE.DirectionalLight(0xc8d8f0, 0.5);
+fillLight.position.set(-4, 2, 2);
+scene.add(fillLight);
+
+// Rim light — from behind, for edge glow
+const rimLight = new THREE.DirectionalLight(0xffeedd, 0.4);
+rimLight.position.set(0, -1, -4);
+scene.add(rimLight);
+
+// Point light — warm glow near card interior (activates on open)
+const interiorLight = new THREE.PointLight(0xffe0b0, 0, 3, 2);
+interiorLight.position.set(0, 0.2, 0.5);
+scene.add(interiorLight);
+
+// ─────────────────────────────────────────
+// GROUND PLANE + SHADOW RECEIVER
+// ─────────────────────────────────────────
+const groundGeo = new THREE.PlaneGeometry(20, 20);
+const groundMat = new THREE.ShadowMaterial({ opacity: 0.55, color: 0x000000 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -1.15;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// Subtle ground gradient disc
+const discGeo = new THREE.CircleGeometry(2.5, 64);
+const discMat = new THREE.MeshBasicMaterial({
+  color: 0x1a1710,
+  transparent: true,
+  opacity: 0.7,
+  depthWrite: false,
+});
+const disc = new THREE.Mesh(discGeo, discMat);
+disc.rotation.x = -Math.PI / 2;
+disc.position.y = -1.14;
+scene.add(disc);
+
+// ─────────────────────────────────────────
+// THEMES
+// ─────────────────────────────────────────
+const THEMES = {
+  Botanical: {
+    cover: 0x1a3d2b,
+    coverDark: 0x152e20,
+    interior: 0xf3efe7,
+    interiorText: 0x1a2e1f,
+    accent: 0xc9a84c,
+    spine: 0x0f2016,
+  },
+  Celestial: {
+    cover: 0x0c1a38,
+    coverDark: 0x080f22,
+    interior: 0xf0eee8,
+    interiorText: 0x161628,
+    accent: 0xe8c840,
+    spine: 0x050a18,
+  },
+  Warmth: {
+    cover: 0xa84e20,
+    coverDark: 0x8a3e18,
+    interior: 0xfdf3e8,
+    interiorText: 0x3a1808,
+    accent: 0xf0dcc0,
+    spine: 0x5a2010,
+  },
+};
+let currentTheme = 'Botanical';
+const themeKeys = Object.keys(THEMES);
+
+// ─────────────────────────────────────────
+// CARD DIMENSIONS
+// ─────────────────────────────────────────
+const W = 1.5;   // half-width (one side of the card)
+const H = 2.0;   // full height
+const D = 0.018; // thickness of each panel
+const SPINE_W = 0.04;
+
+// ─────────────────────────────────────────
+// TEXTURE HELPERS
+// ─────────────────────────────────────────
+function makeCanvas(w, h, fn) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  fn(c.getContext('2d'), w, h);
+  return new THREE.CanvasTexture(c);
+}
+
+function hexToCSS(hex) {
+  return '#' + hex.toString(16).padStart(6, '0');
+}
+
+function makeCoverTexture(theme) {
+  return makeCanvas(512, 682, (ctx, w, h) => {
+    const t = THEMES[theme];
+    // background
+    ctx.fillStyle = hexToCSS(t.cover);
+    ctx.fillRect(0, 0, w, h);
+
+    // subtle vignette
+    const vg = ctx.createRadialGradient(w/2, h/2, h*0.2, w/2, h/2, h*0.75);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.35)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, w, h);
+
+    // decorative corner lines
+    ctx.strokeStyle = hexToCSS(t.accent);
+    ctx.globalAlpha = 0.18;
+    ctx.lineWidth = 1;
+    const m = 28;
+    const l = 55;
+    [[m, m],[w-m, m],[m, h-m],[w-m, h-m]].forEach(([cx, cy]) => {
+      const sx = cx < w/2 ? 1 : -1;
+      const sy = cy < h/2 ? 1 : -1;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + sy * l);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(cx + sx * l, cy);
+      ctx.stroke();
+    });
+
+    // center botanical motif (simple SVG-style paths drawn on canvas)
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = hexToCSS(t.accent);
+    ctx.lineWidth = 1.5;
+    // stem
+    ctx.beginPath();
+    ctx.moveTo(w/2, h/2 + 80);
+    ctx.quadraticCurveTo(w/2, h/2, w/2, h/2 - 80);
+    ctx.stroke();
+    // leaves
+    for (let i = -1; i <= 1; i += 2) {
+      for (let j = -40; j <= 40; j += 40) {
+        ctx.beginPath();
+        ctx.ellipse(w/2 + i*40, h/2 + j, 35, 14, Math.PI * 0.22 * i, 0, Math.PI*2);
+        ctx.stroke();
+      }
+    }
+
+    ctx.globalAlpha = 1;
+
+    // title text
+    ctx.fillStyle = hexToCSS(t.accent);
+    ctx.font = '500 22px Georgia, serif';
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = 0.85;
+    ctx.fillText('Sarah', w/2, h/2 + 140);
+
+    ctx.font = '300 12px system-ui';
+    ctx.letterSpacing = '3px';
+    ctx.globalAlpha = 0.45;
+    ctx.fillText('BIRTHDAY', w/2, h/2 + 165);
+    ctx.globalAlpha = 1;
+  });
+}
+
+function makeInteriorTexture(theme) {
+  return makeCanvas(512, 682, (ctx, w, h) => {
+    const t = THEMES[theme];
+    ctx.fillStyle = hexToCSS(t.interior);
+    ctx.fillRect(0, 0, w, h);
+
+    // subtle warm gradient
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, 'rgba(255,255,255,0.18)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.04)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    // message text
+    ctx.fillStyle = hexToCSS(t.interiorText);
+    ctx.textAlign = 'center';
+
+    ctx.font = 'italic 18px Georgia, serif';
+    ctx.globalAlpha = 0.8;
+    const lines = [
+      'Wishing you a day as bright',
+      'and beautiful as you are.',
+      '',
+      'May this year bring you',
+      'everything your heart desires.',
+    ];
+    lines.forEach((line, i) => {
+      ctx.fillText(line, w/2, h/2 - 40 + i * 30);
+    });
+
+    ctx.font = '300 12px system-ui';
+    ctx.globalAlpha = 0.45;
+    ctx.fillText('— With love, Alex', w/2, h/2 + 120);
+    ctx.globalAlpha = 1;
+  });
+}
+
+function makeSpineTexture(theme) {
+  return makeCanvas(64, 682, (ctx, w, h) => {
+    ctx.fillStyle = hexToCSS(THEMES[theme].spine);
+    ctx.fillRect(0, 0, w, h);
+  });
+}
+
+// ─────────────────────────────────────────
+// CARD GEOMETRY
+// ─────────────────────────────────────────
+//
+// Structure:
+//   cardRoot (pivot at world origin)
+//     spineMesh      (static center, thin box)
+//     backCoverMesh  (static left panel)
+//     frontGroup     (pivots at spine edge for opening)
+//       frontCoverMesh
+//
+// Opening: frontGroup rotates around its left edge (Y axis)
+
+const cardRoot = new THREE.Group();
+scene.add(cardRoot);
+
+// ── Shared materials (rebuilt on theme change) ──
+let coverMat, interiorMat, spineMat;
+let coverMatBack;
+
+function buildMaterials(theme) {
+  const coverTex   = makeCoverTexture(theme);
+  const interiorTex = makeInteriorTexture(theme);
+  const spineTex   = makeSpineTexture(theme);
+  const t = THEMES[theme];
+
+  // Front cover: outside face = cover texture, inside face = interior
+  coverMat = new THREE.MeshStandardMaterial({
+    map: coverTex,
+    roughness: 0.55,
+    metalness: 0.04,
+  });
+  coverMatBack = new THREE.MeshStandardMaterial({
+    map: interiorTex,
+    roughness: 0.7,
+    metalness: 0,
+  });
+  interiorMat = new THREE.MeshStandardMaterial({
+    map: interiorTex,
+    roughness: 0.75,
+    metalness: 0,
+  });
+  spineMat = new THREE.MeshStandardMaterial({
+    map: spineTex,
+    roughness: 0.5,
+    metalness: 0.06,
+  });
+}
+
+// ── Spine ──
+const spineGeo = new THREE.BoxGeometry(SPINE_W, H, D * 2);
+const spineMesh = new THREE.Mesh(spineGeo, null); // material set below
+spineMesh.castShadow = true;
+spineMesh.receiveShadow = true;
+cardRoot.add(spineMesh);
+
+// ── Back panel (left side, static) ──
+// BoxGeometry: 6 faces [right, left, top, bottom, front, back]
+const backGeo = new THREE.BoxGeometry(W, H, D);
+const backMesh = new THREE.Mesh(backGeo, null);
+backMesh.position.x = -(W / 2 + SPINE_W / 2);
+backMesh.castShadow = true;
+backMesh.receiveShadow = true;
+cardRoot.add(backMesh);
+
+// ── Front group (pivots at left edge = spine) ──
+const frontGroup = new THREE.Group();
+// The group pivot is at x = SPINE_W/2 (the spine edge)
+// The panel itself is offset so its left edge touches x=0 inside the group
+frontGroup.position.x = SPINE_W / 2;
+cardRoot.add(frontGroup);
+
+const frontGeo = new THREE.BoxGeometry(W, H, D);
+const frontMesh = new THREE.Mesh(frontGeo, null);
+// Center the panel relative to group: right edge at group origin + W, left at 0
+frontMesh.position.x = W / 2;
+frontMesh.castShadow = true;
+frontMesh.receiveShadow = true;
+frontGroup.add(frontMesh);
+
+// ── Apply materials ──
+function applyMaterials() {
+  const t = THEMES[currentTheme];
+  const edgeMat = new THREE.MeshStandardMaterial({
+    color: t.coverDark,
+    roughness: 0.6,
+    metalness: 0.05,
+  });
+
+  // BoxGeometry face order: +X, -X, +Y, -Y, +Z(front), -Z(back)
+  spineMesh.material = [
+    edgeMat, edgeMat,
+    edgeMat, edgeMat,
+    spineMat, spineMat,
+  ];
+
+  backMesh.material = [
+    edgeMat, edgeMat,
+    edgeMat, edgeMat,
+    interiorMat,   // +Z front face = inside of left panel
+    coverMat,      // -Z back face = outside back cover
+  ];
+
+  frontMesh.material = [
+    edgeMat, edgeMat,
+    edgeMat, edgeMat,
+    coverMat,      // +Z front face = outside front cover
+    coverMatBack,  // -Z back face = inside front panel
+  ];
+}
+
+buildMaterials(currentTheme);
+applyMaterials();
+
+// ─────────────────────────────────────────
+// OPEN / CLOSE ANIMATION
+// ─────────────────────────────────────────
+let isOpen = false;
+let openProgress = 0; // 0 = closed, 1 = open
+const TARGET_OPEN_ANGLE = -Math.PI * 0.96; // slightly less than 180°
+
+function setOpenProgress(p) {
+  openProgress = p;
+  frontGroup.rotation.y = TARGET_OPEN_ANGLE * p;
+
+  // Interior light fades in as card opens
+  interiorLight.intensity = p * 1.4;
+
+  // Raise the card slightly as it opens (feels natural)
+  cardRoot.position.y = Math.sin(p * Math.PI) * 0.08;
+}
+
+let openAnim = null;
+function animateTo(target, duration = 900) {
+  if (openAnim) cancelAnimationFrame(openAnim.id);
+  const start = openProgress;
+  const startTime = performance.now();
+  function step(now) {
+    const t = Math.min((now - startTime) / duration, 1);
+    // Ease in-out cubic
+    const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    setOpenProgress(start + (target - start) * ease);
+    if (t < 1) openAnim = { id: requestAnimationFrame(step) };
+  }
+  openAnim = { id: requestAnimationFrame(step) };
+}
+
+// ─────────────────────────────────────────
+// CLICK TO OPEN (raycasting)
+// ─────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let mouseDownPos = { x: 0, y: 0 };
+
+renderer.domElement.addEventListener('mousedown', e => {
+  mouseDownPos = { x: e.clientX, y: e.clientY };
+});
+
+renderer.domElement.addEventListener('click', e => {
+  // Ignore if user dragged (orbit)
+  const dx = e.clientX - mouseDownPos.x;
+  const dy = e.clientY - mouseDownPos.y;
+  if (Math.sqrt(dx*dx + dy*dy) > 5) return;
+
+  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+
+  const hits = raycaster.intersectObjects([frontMesh, backMesh, spineMesh], false);
+  if (hits.length > 0) {
+    isOpen = !isOpen;
+    animateTo(isOpen ? 1 : 0);
+    document.getElementById('btn-open').textContent = isOpen ? 'Close Card' : 'Open Card';
+    document.getElementById('btn-open').classList.toggle('active', isOpen);
+  }
+});
+
+// ─────────────────────────────────────────
+// BUTTONS
+// ─────────────────────────────────────────
+document.getElementById('btn-open').addEventListener('click', () => {
+  isOpen = !isOpen;
+  animateTo(isOpen ? 1 : 0);
+  document.getElementById('btn-open').textContent = isOpen ? 'Close Card' : 'Open Card';
+  document.getElementById('btn-open').classList.toggle('active', isOpen);
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  // Smooth camera reset
+  const startPos = camera.position.clone();
+  const targetPos = new THREE.Vector3(0, 1.2, 5.5);
+  const startTarget = controls.target.clone();
+  const t0 = performance.now();
+  function resetStep(now) {
+    const p = Math.min((now - t0) / 600, 1);
+    const e = 1 - Math.pow(1 - p, 3);
+    camera.position.lerpVectors(startPos, targetPos, e);
+    controls.target.lerpVectors(startTarget, new THREE.Vector3(0, 0, 0), e);
+    controls.update();
+    if (p < 1) requestAnimationFrame(resetStep);
+  }
+  requestAnimationFrame(resetStep);
+});
+
+let themeIdx = 0;
+document.getElementById('btn-theme').addEventListener('click', () => {
+  themeIdx = (themeIdx + 1) % themeKeys.length;
+  currentTheme = themeKeys[themeIdx];
+  document.getElementById('btn-theme').textContent = currentTheme;
+  buildMaterials(currentTheme);
+  applyMaterials();
+});
+
+// ─────────────────────────────────────────
+// GENTLE IDLE FLOAT
+// ─────────────────────────────────────────
+let idleTime = 0;
+let userInteracting = false;
+
+renderer.domElement.addEventListener('mousedown', () => { userInteracting = true; });
+renderer.domElement.addEventListener('mouseup',   () => { setTimeout(() => userInteracting = false, 200); });
+
+// ─────────────────────────────────────────
+// RENDER LOOP
+// ─────────────────────────────────────────
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const delta = clock.getDelta();
+  idleTime += delta;
+  controls.update();
+
+  // Gentle float when not interacting and card is closed
+  if (!userInteracting && !isOpen) {
+    const floatY = Math.sin(idleTime * 0.5) * 0.04;
+    const floatRot = Math.sin(idleTime * 0.35) * 0.018;
+    cardRoot.position.y += (floatY - cardRoot.position.y) * 0.05;
+    cardRoot.rotation.z += (floatRot - cardRoot.rotation.z) * 0.03;
+  } else if (!isOpen) {
+    cardRoot.rotation.z *= 0.95; // damp
+  }
+
+  renderer.render(scene, camera);
+}
+animate();
+
+// ─────────────────────────────────────────
+// RESIZE
+// ─────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
